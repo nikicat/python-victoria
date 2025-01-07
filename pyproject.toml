@@ -1,0 +1,17 @@
+[project]
+name = "victoria"
+version = "0.1.0"
+description = "Client for VictoriaMetrics"
+readme = "README.md"
+authors = [
+    { name = "Nikolay Bryskin", email = "nikicat@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28.1",
+    "tqdm>=4.67.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
