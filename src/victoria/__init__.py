@@ -1,11 +1,10 @@
-import time
 import json
 import os
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from typing import Generator
 
 import httpx
@@ -19,7 +18,7 @@ class Result:
     amount_in: Decimal
     provider: str
     elapsed: float
-    time: datetime = None
+    time: datetime|None = None
     amount_out: int = 0
     amount_out_min: int = 0
     error: Exception|str = ''
@@ -35,20 +34,7 @@ class Point:
 
 
 async def push_results_to_victoria(results: list[Result]):
-    await push_to_victoria([p for r in results for p in result_to_points(r)])
-
-
-async def push_to_victoria(points: list[Point]):
-    if os.getenv('SYMBMON_PRINT_POINTS'):
-        for p in points:
-            print(p)
-    logging.debug("pushing to victoria %d points", len(points))
-    data = '\n'.join(json.dumps(point_to_victoria(p)) for p in points)
-    url = os.getenv('VICTORIAMETRICS_URL')
-    assert(url is not None)
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(url+"/import", data=data)
-        resp.raise_for_status()
+    await Victoria().push_points([p for r in results for p in result_to_points(r)])
 
 
 def result_to_points(r: Result) -> Generator[Point]:
@@ -61,6 +47,7 @@ def result_to_points(r: Result) -> Generator[Point]:
 
 
 def result_to_point(metric: str, value: float, r: Result) -> Point:
+    assert(r.time is not None)
     return Point(
         name=metric,
         time=r.time,
@@ -90,7 +77,11 @@ def result_to_labels(r: Result):
 
 
 class Victoria:
-    def __init__(self, limit):
+    def __init__(self, limit: int = 1000, url: str|None = None):
+        if url is None:
+            url = os.getenv('VICTORIAMETRICS_URL')
+            assert(url is not None)
+        self.url = url
         self.points = []
         self.limit = limit
         self.t = tqdm(total=self.limit, desc="Victoria buffer")
@@ -99,13 +90,20 @@ class Victoria:
         self.points.append(point)
         self.t.update(1)
         if len(self.points) == self.limit:
-            await push_to_victoria(self.points)
+            await self.push_points(self.points)
             self.points = []
             self.t.reset()
 
+    async def push_points(self, points: list[Point]):
+        logging.debug("pushing to victoria %d points", len(points))
+        data = '\n'.join(json.dumps(point_to_victoria(p)) for p in points)
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(self.url+"/import", data=data)
+            resp.raise_for_status()
+
     @asynccontextmanager
     @staticmethod
-    async def use(limit=1000):
-        v = Victoria(limit)
+    async def use(limit: int = 1000, url: str|None = None):
+        v = Victoria(limit, url)
         yield v
-        await push_to_victoria(v.points)
+        await v.push_points(v.points)
